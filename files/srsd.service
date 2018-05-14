@@ -1,0 +1,12 @@
+[Unit]
+Description=SRS Deamon
+After=network.target
+
+[Service]
+User=Debian-exim
+ExecStart=/usr/bin/srsd --secretfile /etc/srsd.secret
+ExecStop=/bin/kill -s TERM $MAINPID
+ExecStopPost=rm -f /tmp/srsd
+
+[Install]
+WantedBy=multi-user.target
