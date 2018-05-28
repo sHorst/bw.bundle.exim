@@ -121,6 +121,20 @@ if exim_config.get('spamassassin', {}).get('enabled', False):
         ],
         'needs': needs_exim,
     }
+    pkg_apt['pyzor'] = {
+        "installed": True,
+        'needed_by': [
+            'svc_systemd:spamassassin',
+        ],
+        'needs': needs_exim,
+    }
+    pkg_apt['razor'] = {
+        "installed": True,
+        'needed_by': [
+            'svc_systemd:spamassassin',
+        ],
+        'needs': needs_exim,
+    }
     pkg_apt['libgeo-ip-perl'] = {
         "installed": True,
         'needed_by': [
