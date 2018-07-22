@@ -28,6 +28,8 @@
 #
 # lock_method flock
 
+bayes_path /var/spamassassin/bayesdb/bayes
+
 
 #   Set the threshold at which a message is considered spam (default: 5.0)
 #
@@ -87,3 +89,8 @@ ifplugin Mail::SpamAssassin::Plugin::Shortcircuit
 # shortcircuit BAYES_00                ham
 
 endif # Mail::SpamAssassin::Plugin::Shortcircuit
+
+use_pyzor 1
+pyzor_options --homedir /etc/mail/spamassassin
+use_razor 1
+razor_config /etc/razor/razor-agent.conf
