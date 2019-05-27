@@ -386,7 +386,7 @@ if exim_config.get('dkim', {}).get('enabled', False):
         }
 
         files['/etc/exim4/dkim/{}.key'.format(domain)] = {
-            'content': repo.libs.pw.decrypt_file(
+            'content': repo.vault.decrypt_file(
                 join("dkim_keys", config.get('key', '{}.key'.format(domain)))
             ),
             'content_type': 'text',
