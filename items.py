@@ -85,7 +85,7 @@ if exim_config.get('srs', {}).get('enabled', False):
         'mode': "0444",
     }
     files['/etc/srsd.secret'] = {
-        'content': repo.libs.pw.get('exim_srs_secret_node_{}'.format(node.name))[0:16] + '\n',
+        'content': repo.vault.password_for('exim_srs_secret_node_{}'.format(node.name), length=16).value + '\n',
         'content_type': 'text',
         'owner': "Debian-exim",
         'group': "root",
