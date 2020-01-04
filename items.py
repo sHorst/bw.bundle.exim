@@ -2,7 +2,11 @@ from os.path import join
 from bundlewrap.utils import get_file_contents
 
 
-pkg_apt = {}
+pkg_apt = {
+    'spf-tools-perl': {
+        'installed': True,
+    },
+}
 pkg_pip = {}
 files = {}
 directories = {}
