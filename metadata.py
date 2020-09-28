@@ -1,183 +1,198 @@
 from os.path import join
 from bundlewrap.utils import get_file_contents
 
+defaults = {}
 
-@metadata_processor
+# load default_configs, which is located next to us, but we have to do this limbo to import it
+input_variables = {}
+exec(get_file_contents(join(repo.path, 'bundles', 'exim', 'default_configs.py')), input_variables)
+default_configs = input_variables.get('default_configs', {})
+
+# load default_config into exim_config
+for config_group_name, default_config_group in default_configs.items():
+    for config_file_name, default_config_file_config in default_config_group.items():
+        defaults['exim'] = {
+            config_group_name: {
+                config_file_name: {
+                    'content': default_config_file_config.get('content', []),
+                    'prio': default_config_file_config.get('prio', 10),
+                }
+            }
+        }
+
+
+@metadata_reactor
 def add_iptables_rules(metadata):
-    if node.has_bundle("iptables"):
-        # only open, if we are configured for internet use
-        if metadata.get('exim', {}).get('configtype', '') == 'internet':
-            ports = [25, 587, 465]
+    if not node.has_bundle("iptables"):
+        raise DoNotRunAgain
 
-            interfaces = ['main_interface']
-            interfaces += metadata.get('exim', {}).get('additional_interfaces', [])
+    # only open, if we are configured for internet use
+    if metadata.get('exim/configtype', '') == 'internet':
+        ports = [25, 587, 465]
 
-            for interface in interfaces:
-                for port in ports:
-                    metadata += repo.libs.iptables.accept(). \
-                        input(interface). \
-                        state_new(). \
-                        tcp(). \
-                        dest_port(port)
+        interfaces = ['main_interface']
+        interfaces += metadata.get('exim/additional_interfaces', [])
 
-    return metadata, DONE
+        iptables_rules = {}
+        for interface in interfaces:
+            for port in ports:
+                iptables_rules += repo.libs.iptables.accept(). \
+                    input(interface). \
+                    state_new(). \
+                    tcp(). \
+                    dest_port(port)
+
+        return iptables_rules
+
+    return {}
 
 
-@metadata_processor
+@metadata_reactor
 def add_restic_rules(metadata):
-    if node.has_bundle('restic'):
-        if metadata.get('exim', {}).get('configtype', '') == 'internet':
-            # TODO: add spool and other directoryies
-            # TODO: configure correct folder here
-            backup_folders = ['/var/opt/vmail', ]
+    if not node.has_bundle('restic'):
+        raise DoNotRunAgain
 
-            metadata.setdefault('restic', {})
+    if metadata.get('exim/configtype', '') == 'internet':
+        # TODO: add spool and other directoryies
+        # TODO: configure correct folder here
+        return {
+            'restic': {
+                'backup_folders': ['/var/opt/vmail', ]
+            }
 
-            metadata['restic']['backup_folders'] = metadata['restic'].get('backup_folders', []) + backup_folders
+        }
 
-    return metadata, DONE
-
-
-@metadata_processor
-def add_default_config(metadata):
-    metadata.setdefault('exim', {})
-
-    # load default_configs, which is located next to us, but we have to do this limbo to import it
-    input_variables = {}
-    exec(get_file_contents(join(repo.path, 'bundles', 'exim', 'default_configs.py')), input_variables)
-    default_configs = input_variables.get('default_configs', {})
-
-    # load default_config into exim_config
-    for config_group_name, default_config_group in default_configs.items():
-        for config_file_name, default_config_file_config in default_config_group.items():
-            metadata['exim'].setdefault(config_group_name, {}).setdefault(config_file_name, {})
-
-            metadata['exim'][config_group_name][config_file_name] \
-                .setdefault('content', default_config_file_config.get('content', []))
-
-            metadata['exim'][config_group_name][config_file_name] \
-                .setdefault('prio', default_config_file_config.get('prio', 10))
-
-    return metadata, DONE
+    return {}
 
 
-@metadata_processor
+@metadata_reactor
 def add_dkim_config(metadata):
-    if metadata.get('exim', {}).get('dkim', {}).get('enabled', False):
-        metadata['exim'].setdefault('main', {})
-
-        metadata['exim']['main']['dkim_macros'] = {
-            'prio': 0,
-            'content': [
-                # TODO: make configurable by domain
-                'DKIM_CANON = relaxed',
-                # TODO: make configurable by domain
-                'DKIM_SELECTOR = 20161012',
-                '',
-                '# Get the domain from the outgoing mail.',
-                'DKIM_DOMAIN = ${sg{${lc:${domain:$h_from:}}}{^www\.}{}}',
-                '',
-                '# The file is based on the outgoing domain-name in the from-header.',
-                'DKIM_FILE = /etc/exim4/dkim/DKIM_DOMAIN.key',
-                '',
-                '# If key exists then use it, if not don\'t.',
-                'DKIM_PRIVATE_KEY = ${if exists{DKIM_FILE}{DKIM_FILE}{0}}',
-            ],
-
+    if metadata.get('exim/dkim/enabled', False):
+        return {
+            'exim': {
+                'main': {
+                    'dkim_macros': {
+                        'prio': 0,
+                        'content': [
+                            # TODO: make configurable by domain
+                            'DKIM_CANON = relaxed',
+                            # TODO: make configurable by domain
+                            'DKIM_SELECTOR = 20161012',
+                            '',
+                            '# Get the domain from the outgoing mail.',
+                            'DKIM_DOMAIN = ${sg{${lc:${domain:$h_from:}}}{^www\.}{}}',
+                            '',
+                            '# The file is based on the outgoing domain-name in the from-header.',
+                            'DKIM_FILE = /etc/exim4/dkim/DKIM_DOMAIN.key',
+                            '',
+                            '# If key exists then use it, if not don\'t.',
+                            'DKIM_PRIVATE_KEY = ${if exists{DKIM_FILE}{DKIM_FILE}{0}}',
+                        ],
+                    },
+                    'enable_dkim': {
+                        'prio': 5,
+                        'content': [
+                            'acl_smtp_dkim = acl_check_dkim',
+                        ],
+                    },
+                },
+                'acl': {
+                    'local_dkim_check': {
+                        'prio': 10,
+                        'content': [
+                            'acl_check_dkim:',
+                            '',
+                            '      # Deny failures',
+                            '      deny',
+                            '           dkim_status = fail',
+                            '           logwrite = DKIM test failed: $dkim_verify_reason',
+                            '           add_header = X-DKIM: DKIM test failed: '
+                            '(address=$sender_address domain=$dkim_cur_signer), signature is bad.',
+                            '',
+                            '',
+                            '      # Deny invalid signatures',
+                            '      deny',
+                            '           dkim_status = invalid',
+                            '           add_header = X-DKIM: $dkim_cur_signer '
+                            '($dkim_verify_status); $dkim_verify_reason',
+                            '           logwrite = DKIM test passed (address=$sender_address domain=$dkim_cur_signer), '
+                            'but signature is invalid.',
+                            '',
+                            '      # Accept valid/passed sigs',
+                            '      accept',
+                            '           dkim_status = pass',
+                            '           logwrite = DKIM test passed',
+                            '           add_header = X-DKIM: DKIM passed:'
+                            ' (address=$sender_address domain=$dkim_cur_signer), signature is good.',
+                            '',
+                            '',
+                            '      # And anything else.',
+                            '      accept',
+                        ],
+                    }
+                }
+            },
         }
 
-        metadata['exim']['main']['enable_dkim'] = {
-            'prio': 5,
-            'content': [
-                'acl_smtp_dkim = acl_check_dkim',
-            ],
-        }
-
-        metadata['exim'].setdefault('acl', {})
-
-        metadata['exim']['acl']['local_dkim_check'] = {
-            'prio': 10,
-            'content': [
-                'acl_check_dkim:',
-                '',
-                '      # Deny failures',
-                '      deny',
-                '           dkim_status = fail',
-                '           logwrite = DKIM test failed: $dkim_verify_reason',
-                '           add_header = X-DKIM: DKIM test failed: (address=$sender_address domain=$dkim_cur_signer), signature is bad.',
-                '',
-                '',
-                '      # Deny invalid signatures',
-                '      deny',
-                '           dkim_status = invalid',
-                '           add_header = X-DKIM: $dkim_cur_signer ($dkim_verify_status); $dkim_verify_reason',
-                '           logwrite = DKIM test passed (address=$sender_address domain=$dkim_cur_signer), but signature is invalid.',
-                '',
-                '      # Accept valid/passed sigs',
-                '      accept',
-                '           dkim_status = pass',
-                '           logwrite = DKIM test passed',
-                '           add_header = X-DKIM: DKIM passed: (address=$sender_address domain=$dkim_cur_signer), signature is good.',
-                '',
-                '',
-                '      # And anything else.',
-                '      accept',
-            ],
-        }
-
-    return metadata, DONE
+    return {}
 
 
-@metadata_processor
+@metadata_reactor
 def add_srs_config(metadata):
-    if metadata.get('exim', {}).get('srs', {}).get('enabled', False):
-        metadata['exim'].setdefault('router', {})
-
-        metadata['exim']['router']['srs'] = {
-            'prio': 175,
-            'content': [
-                'srs_bounce:',
-                '  debug_print = "R: srs_bounce for $local_part@$domain"',
-                '  driver = redirect',
-                '  allow_fail',
-                '  allow_defer',
-                '  domains = $primary_hostname',
-                '  local_part_prefix = srs0+ : srs0- : srs0= : srs1+ : srs1- : srs1=',
-                '  caseful_local_part',
-                '  address_data = ${readsocket{/tmp/srsd}{REVERSE $local_part_prefix$local_part@$domain}{5s}{\\n}{:defer: SRS daemon failure}}',
-                '  data = ${if match{$address_data}{^ERROR}{:fail: Invalid SRS address}{$address_data}}',
-                '',
-                'srs_forward:',
-                '  debug_print = "R: srs_forward for $local_part@$domain"',
-                '  no_verify',
-                '  senders = ! : ! *@+local_domains',
-                '  address_data = ${readsocket{/tmp/srsd}\\',
-                '                {FORWARD $sender_address_local_part@$sender_address_domain $primary_hostname\\n}\\',
-                '                                        {5s}{\\n}{:defer: SRS daemon failure}}',
-                '  errors_to = ${quote_local_part:${local_part:$address_data}}@${domain:$address_data}',
-                '  headers_add = "X-SRS: Sender address rewritten from <$sender_address> to <${quote_local_part:${local_part:$address_data}}@${domain:$address_data}> by $primary_hostname."',
-                '  driver = redirect',
-                '  repeat_use = false',
-                '  allow_defer',
-                '  data = ${quote_local_part:$local_part}@$domain',
-            ]
+    if metadata.get('exim/srs/enabled', False):
+        return {
+            'exim': {
+                'router': {
+                    'srs': {
+                        'prio': 175,
+                        'content': [
+                            'srs_bounce:',
+                            '  debug_print = "R: srs_bounce for $local_part@$domain"',
+                            '  driver = redirect',
+                            '  allow_fail',
+                            '  allow_defer',
+                            '  domains = $primary_hostname',
+                            '  local_part_prefix = srs0+ : srs0- : srs0= : srs1+ : srs1- : srs1=',
+                            '  caseful_local_part',
+                            '  address_data = ${readsocket{/tmp/srsd}{REVERSE $local_part_prefix$local_part@$domain}{5s}{\\n}{:defer: SRS daemon failure}}',
+                            '  data = ${if match{$address_data}{^ERROR}{:fail: Invalid SRS address}{$address_data}}',
+                            '',
+                            'srs_forward:',
+                            '  debug_print = "R: srs_forward for $local_part@$domain"',
+                            '  no_verify',
+                            '  senders = ! : ! *@+local_domains',
+                            '  address_data = ${readsocket{/tmp/srsd}\\',
+                            '                {FORWARD $sender_address_local_part@$sender_address_domain $primary_hostname\\n}\\',
+                            '                                        {5s}{\\n}{:defer: SRS daemon failure}}',
+                            '  errors_to = ${quote_local_part:${local_part:$address_data}}@${domain:$address_data}',
+                            '  headers_add = "X-SRS: Sender address rewritten from <$sender_address> to <${quote_local_part:${local_part:$address_data}}@${domain:$address_data}> by $primary_hostname."',
+                            '  driver = redirect',
+                            '  repeat_use = false',
+                            '  allow_defer',
+                            '  data = ${quote_local_part:$local_part}@$domain',
+                        ]
+                    }
+                }
+            }
         }
 
-    return metadata, DONE
+    return {}
 
 
-@metadata_processor
+@metadata_reactor
 def add_greylistd_config(metadata):
-    if metadata.get('exim', {}).get('greylist', {}).get('enabled', False):
-        if 'exim4-config_check_rcpt' not in metadata.get('exim', {}).get('acl', {})\
-            or 'exim4-config_check_data' not in metadata.get('exim', {}).get('acl', {}):
-            return metadata, RUN_ME_AGAIN
+    if metadata.get('exim/greylist/enabled', False):
+        if 'exim4-config_check_rcpt' not in metadata.get('exim/acl', {}) \
+                or 'exim4-config_check_data' not in metadata.get('exim/acl', {}):
+            return {}
 
         # patch greylist into config
-        new_content = []
-        for line in metadata['exim']['acl']['exim4-config_check_rcpt']['content']:
+        check_rcpt = []
+        check_data = []
+
+        for line in metadata.get('exim/acl/exim4-config_check_rcpt/content'):
             if line == 'acl_check_rcpt:':
-                new_content += [
+                check_rcpt += [
                     'acl_check_rcpt:',
                     '  # greylistd(8) configuration follows.',
                     '  # This statement has been added by "greylistd-setup-exim4",',
@@ -244,14 +259,11 @@ def add_greylistd_config(metadata):
                     '',
                 ]
             else:
-                new_content.append(line)
+                check_rcpt.append(line)
 
-        metadata['exim']['acl']['exim4-config_check_rcpt']['content'] = new_content
-
-        new_content = []
-        for line in metadata['exim']['acl']['exim4-config_check_data']['content']:
+        for line in metadata.get('exim/acl/exim4-config_check_data/content'):
             if line == 'acl_check_data:':
-                new_content += [
+                check_data += [
                     'acl_check_data:',
                     '  # greylistd(8) configuration follows.',
                     '  # This statement has been added by "greylistd-setup-exim4",',
@@ -305,10 +317,20 @@ def add_greylistd_config(metadata):
                     '',
                 ]
             else:
-                new_content.append(line)
+                check_data.append(line)
 
-        metadata['exim']['acl']['exim4-config_check_data']['content'] = new_content
+        return {
+            'exim': {
+                'acl': {
+                    'exim4-config_check_rcpt': {
+                        'content': check_rcpt,
+                    },
+                    'exim4-config_check_data': {
+                        'content': check_data,
+                    }
 
-        # print(metadata['exim']['main'])
+                },
+            }
+        }
 
-    return metadata, DONE
+    return {}
