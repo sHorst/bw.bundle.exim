@@ -9,16 +9,7 @@ exec(get_file_contents(join(repo.path, 'bundles', 'exim', 'default_configs.py'))
 default_configs = input_variables.get('default_configs', {})
 
 # load default_config into exim_config
-for config_group_name, default_config_group in default_configs.items():
-    for config_file_name, default_config_file_config in default_config_group.items():
-        defaults['exim'] = {
-            config_group_name: {
-                config_file_name: {
-                    'content': default_config_file_config.get('content', []),
-                    'prio': default_config_file_config.get('prio', 10),
-                }
-            }
-        }
+defaults['exim'] = default_configs
 
 
 @metadata_reactor
