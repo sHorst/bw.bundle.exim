@@ -225,9 +225,6 @@ if exim_config.get('greylist', {}).get('enabled', False):
     git_deploy['/opt/exim-tools'] = {
         'repo': 'ssh://github.com/shorst/tools.git',
         'rev': 'master',
-        'needs': [
-            'directory:/opt/exim-tools',
-        ],
     }
 
     actions['greylist_regenerate_whitelist'] = {
