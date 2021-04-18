@@ -1,5 +1,6 @@
 from os.path import join
 from bundlewrap.utils import get_file_contents
+from bundlewrap.metadata import atomic
 
 defaults = {}
 
@@ -314,10 +315,10 @@ def add_greylistd_config(metadata):
             'exim': {
                 'acl': {
                     'exim4-config_check_rcpt': {
-                        'content': check_rcpt,
+                        'content': atomic(check_rcpt),
                     },
                     'exim4-config_check_data': {
-                        'content': check_data,
+                        'content': atomic(check_data),
                     }
 
                 },

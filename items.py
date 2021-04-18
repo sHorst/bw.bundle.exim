@@ -320,7 +320,7 @@ generated_config = []
 for config_group in ['main', 'acl', 'router', 'transport', 'retry', 'rewrite', 'auth']:
     # order by prio
     for config_name, config in sorted(exim_config.get(config_group, {}).items(),
-                                      key=lambda x: "{p:50d}_{n}".format(p=x[1].get('prio', 10), n=x[0])
+                                      key=lambda x: "{p:50d}_{n}".format(p=int(x[1].get('prio', 10)), n=str(x[0]))
                                       ):
         if config.get('disabled', False):
             continue
