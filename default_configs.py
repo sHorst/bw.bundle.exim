@@ -2008,7 +2008,7 @@ default_configs = {
                 '.endif',
                 '.ifndef REMOTE_SMTP_DISABLE_DANE',
                 'dnssec_request_domains = *',
-                'hosts_try_dane = *',
+                '#hosts_try_dane = *', # TODO: reenable
                 '.endif',
             ],
         },

@@ -93,6 +93,7 @@ def add_dkim_config(metadata):
                         'prio': 10,
                         'content': [
                             'acl_check_dkim:',
+                            '      accept', # TODO: remove this
                             '',
                             '      # Deny failures',
                             '      deny',
