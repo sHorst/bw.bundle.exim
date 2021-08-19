@@ -180,12 +180,12 @@ if exim_config.get('spamassassin', {}).get('enabled', False):
 if exim_config.get('greylist', {}).get('enabled', False):
     greylist_config = exim_config['greylist']
 
-    svc_systemd['greylist'] = {
+    svc_systemd['greylistd'] = {
     }
     pkg_apt['greylistd'] = {
         "installed": True,
         'needed_by': [
-            'svc_systemd:greylist',
+            'svc_systemd:greylistd',
             'svc_systemd:exim4'
         ],
         'needs': needs_exim,
@@ -201,7 +201,7 @@ if exim_config.get('greylist', {}).get('enabled', False):
         'group': 'root',
         'mode': '0644',
         'triggers': [
-            'svc_systemd:greylist:restart',
+            'svc_systemd:greylistd:restart',
             'svc_systemd:exim4:restart',
         ],
         'context': {
@@ -237,7 +237,7 @@ if exim_config.get('greylist', {}).get('enabled', False):
             'git_deploy:/opt/exim-tools',
         ],
         'needed_by': [
-            'svc_systemd:greylist',
+            'svc_systemd:greylistd',
             'svc_systemd:exim4',
         ]
     }
@@ -250,7 +250,7 @@ if exim_config.get('greylist', {}).get('enabled', False):
         'mode': '0644',
         'triggers': [
             'action:greylist_regenerate_whitelist',
-            'svc_systemd:greylist:restart',
+            'svc_systemd:greylistd:restart',
             'svc_systemd:exim4:restart',
         ],
         'needs': ['pkg_apt:greylistd'],
@@ -263,7 +263,7 @@ if exim_config.get('greylist', {}).get('enabled', False):
         'mode': '0644',
         'triggers': [
             'action:greylist_regenerate_whitelist',
-            'svc_systemd:greylist:restart',
+            'svc_systemd:greylistd:restart',
             'svc_systemd:exim4:restart',
         ],
         'needs': ['pkg_apt:greylistd'],
