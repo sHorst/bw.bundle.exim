@@ -371,7 +371,7 @@ if exim_config.get('dkim', {}).get('enabled', False):
     directories['/etc/exim4/dkim'] = {
         'mode': '755',
         'owner': 'root',
-        'group': 'root',
+        'group': 'Debian-exim',
         'needs': needs_exim,
     }
     for domain, config in exim_config['dkim'].get('domains', {}).items():
@@ -380,9 +380,9 @@ if exim_config.get('dkim', {}).get('enabled', False):
                 join(repo.path, "data", "dkim_keys", config.get('crt', '{}.crt'.format(domain)))
             ),
             'content_type': 'text',
-            'owner': "root",
-            'group': "root",
-            'mode': "0644",
+            'owner': "Debian-exim",
+            'group': "Debian-exim",
+            'mode': "0400",
             'needs': needs_exim,
         }
 
@@ -391,8 +391,8 @@ if exim_config.get('dkim', {}).get('enabled', False):
                 join("dkim_keys", config.get('key', '{}.key'.format(domain)))
             ),
             'content_type': 'text',
-            'owner': "root",
-            'group': "root",
-            'mode': "0644",
+            'owner': "Debian-exim",
+            'group': "Debian-exim",
+            'mode': "0400",
             'needs': needs_exim,
         }

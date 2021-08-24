@@ -4,6 +4,7 @@ After=network.target
 
 [Service]
 User=Debian-exim
+ExecStartPre=+rm -f /tmp/srsd
 ExecStart=/usr/bin/srsd --secretfile /etc/srsd.secret
 ExecStop=/bin/kill -s TERM $MAINPID
 ExecStopPost=rm -f /tmp/srsd
