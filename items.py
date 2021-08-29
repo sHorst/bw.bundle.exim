@@ -375,7 +375,7 @@ if exim_config.get('dkim', {}).get('enabled', False):
         'needs': needs_exim,
     }
     for domain, config in exim_config['dkim'].get('domains', {}).items():
-        selector = config.get('selector', '20161012')
+        selector = config.get('selector', exim_config['dkim'].get('defaults', {}).get('selector', '20161012'))
         files[f'/etc/exim4/dkim/{selector}.{domain}.crt'] = {
             'content': get_file_contents(
                 join(repo.path, "data", "dkim_keys", config.get('crt', f'{selector}.{domain}.crt'))
