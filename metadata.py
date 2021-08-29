@@ -11,6 +11,12 @@ default_configs = input_variables.get('default_configs', {})
 
 # load default_config into exim_config
 defaults['exim'] = default_configs
+defaults['exim']['dkim'] = {
+    'defaults': {
+        'canon': 'relaxed',
+        'selector': '20161012',
+    },
+}
 
 
 @metadata_reactor
@@ -60,22 +66,38 @@ def add_restic_rules(metadata):
 @metadata_reactor
 def add_dkim_config(metadata):
     if metadata.get('exim/dkim/enabled', False):
+        default_config = metadata.get('exim/dkim/defaults', {})
+
+        canon = ''
+        canon_close = ''
+        selector = ''
+        selector_close = ''
+        domain = ''
+        domain_close = ''
+        for dkim_domain, dkim_config in sorted(metadata.get('exim/dkim/domains', {}).items()):
+            canon += '${if eq {${lc:${domain:$h_from:}}}{'+dkim_domain+'} {' + \
+                     dkim_config.get('canon', default_config.get('canon', 'relaxed')) + '}{'
+            canon_close += '}}'
+            selector += '${if eq {${lc:${domain:$h_from:}}}{' + dkim_domain + '} {' + \
+                        dkim_config.get('selector', default_config.get('selector', '')) + '}{'
+            selector_close += '}}'
+            domain += '${if eq {${lc:${domain:$h_from:}}}{' + dkim_domain + '} {' + dkim_domain + '}{'
+            domain_close += '}}'
+
         return {
             'exim': {
                 'main': {
                     'dkim_macros': {
                         'prio': 0,
                         'content': [
-                            # TODO: make configurable by domain
-                            'DKIM_CANON = relaxed',
-                            # TODO: make configurable by domain
-                            'DKIM_SELECTOR = 20161012',
+                            f'DKIM_CANON = {canon}relaxed{canon_close}',
+                            f'DKIM_SELECTOR = {selector}{selector_close}',
                             '',
                             '# Get the domain from the outgoing mail.',
-                            'DKIM_DOMAIN = ${sg{${lc:${domain:$h_from:}}}{^www\.}{}}',
+                            f'DKIM_DOMAIN = {domain}{domain_close}',
                             '',
                             '# The file is based on the outgoing domain-name in the from-header.',
-                            'DKIM_FILE = /etc/exim4/dkim/DKIM_DOMAIN.key',
+                            'DKIM_FILE = /etc/exim4/dkim/${dkim_selector}.${dkim_domain}.key',
                             '',
                             '# If key exists then use it, if not don\'t.',
                             'DKIM_PRIVATE_KEY = ${if exists{DKIM_FILE}{DKIM_FILE}{0}}',

@@ -375,9 +375,10 @@ if exim_config.get('dkim', {}).get('enabled', False):
         'needs': needs_exim,
     }
     for domain, config in exim_config['dkim'].get('domains', {}).items():
-        files['/etc/exim4/dkim/{}.crt'.format(domain)] = {
+        selector = config.get('selector', '20161012')
+        files[f'/etc/exim4/dkim/{selector}.{domain}.crt'] = {
             'content': get_file_contents(
-                join(repo.path, "data", "dkim_keys", config.get('crt', '{}.crt'.format(domain)))
+                join(repo.path, "data", "dkim_keys", config.get('crt', f'{selector}.{domain}.crt'))
             ),
             'content_type': 'text',
             'owner': "Debian-exim",
@@ -386,9 +387,9 @@ if exim_config.get('dkim', {}).get('enabled', False):
             'needs': needs_exim,
         }
 
-        files['/etc/exim4/dkim/{}.key'.format(domain)] = {
+        files[f'/etc/exim4/dkim/{selector}.{domain}.key'] = {
             'content': repo.vault.decrypt_file(
-                join("dkim_keys", config.get('key', '{}.key'.format(domain)))
+                join("dkim_keys", config.get('key', f'{selector}.{domain}.key'))
             ),
             'content_type': 'text',
             'owner': "Debian-exim",
