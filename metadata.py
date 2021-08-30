@@ -19,6 +19,18 @@ defaults['exim']['dkim'] = {
 }
 
 
+def sort_by_order(x):
+    if isinstance(x, str):
+        return '0010_{}'.format(x)
+
+    if isinstance(x[1], dict):
+        prio = x[1].get('order', 100)
+    else:
+        prio = 10
+
+    return '{}_{}'.format(str(prio).zfill(3), x[0])
+
+
 @metadata_reactor
 def add_iptables_rules(metadata):
     if not node.has_bundle("iptables"):
@@ -74,7 +86,7 @@ def add_dkim_config(metadata):
         selector_close = ''
         domain = ''
         domain_close = ''
-        for dkim_domain, dkim_config in sorted(metadata.get('exim/dkim/domains', {}).items()):
+        for dkim_domain, dkim_config in sorted(metadata.get('exim/dkim/domains', {}).items(), key=sort_by_order):
             canon += '${if eq {${lc:${domain:$h_from:}}}{'+dkim_domain+'} {' + \
                      dkim_config.get('canon', default_config.get('canon', 'relaxed')) + '}{'
             canon_close += '}}'
