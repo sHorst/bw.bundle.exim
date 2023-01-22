@@ -119,3 +119,38 @@ use_pyzor 1
 pyzor_options --homedir /etc/mail/spamassassin
 use_razor 1
 razor_config /etc/razor/razor-agent.conf
+
+# Charset
+report_charset		UTF-8
+
+# Sensible contact
+report_contact		postmaster@ultrachaos.de
+report_hostname		ultrachaos.de
+
+# I Don't understand other languages
+ok_languages		en nl de fr
+ok_locales		en nl de fr
+
+# HTML with image and 0 - 400 bytes text
+score HTML_IMAGE_ONLY_04	10.0
+
+# Razor, identical to Pyzor
+score RAZOR2_CHECK		2.0
+score RAZOR2_CF_RANGE_51_100	2.0
+score RAZOR2_CF_RANGE_E4_51_100	2.0
+score RAZOR2_CF_RANGE_E8_51_100	2.0
+
+# More bayes
+#score BAYES_40		 2.0
+#score BAYES_50		 2.5
+score BAYES_60		 3.0
+score BAYES_80		 4.0
+score BAYES_95		 5.0
+score BAYES_99		10.0
+score BAYES_999		10.0
+
+# SORBS Sux
+score RCVD_IN_SORBS_DUL	0
+
+# Barracuda Sux
+score RCVD_IN_BRBL_LASTEXT	0

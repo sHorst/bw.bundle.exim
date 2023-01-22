@@ -2,6 +2,8 @@ from os.path import join
 from bundlewrap.utils import get_file_contents
 from bundlewrap.metadata import atomic
 
+global repo, node, DoNotRunAgain, metadata_reactor
+
 defaults = {}
 
 # load default_configs, which is located next to us, but we have to do this limbo to import it
@@ -11,6 +13,21 @@ default_configs = input_variables.get('default_configs', {})
 
 # load default_config into exim_config
 defaults['exim'] = default_configs
+
+# allow for additional ACL config via hook
+defaults['exim']['acl_config'] = {
+    'acl_smtp_mail': 'acl_check_mail',
+    'acl_smtp_rcpt': 'acl_check_rcpt',
+    'acl_smtp_data': 'acl_check_data',
+    'acl_smtp_dkim': 'acl_check_dkim',
+}
+
+defaults['exim']['acl_add'] = {
+    'acl_smtp_mail': {},
+    'acl_smtp_rcpt': {},
+    'acl_smtp_data': {},
+    'acl_smtp_dkim': {},
+},
 defaults['exim']['dkim'] = {
     'defaults': {
         'canon': 'relaxed',
@@ -36,8 +53,8 @@ def add_iptables_rules(metadata):
     if not node.has_bundle("iptables"):
         raise DoNotRunAgain
 
-    # only open, if we are configured for internet use
-    if metadata.get('exim/configtype', '') == 'internet':
+    # only open, if we are configured for internet or smarthost use
+    if metadata.get('exim/configtype', '') in ('internet', 'smarthost'):
         ports = [25, 587, 465]
 
         interfaces = ['main_interface']
@@ -62,7 +79,7 @@ def add_restic_rules(metadata):
     if not node.has_bundle('restic'):
         raise DoNotRunAgain
 
-    if metadata.get('exim/configtype', '') == 'internet':
+    if metadata.get('exim/configtype', '') in ('internet', 'smarthost'):
         # TODO: add spool and other directoryies
         # TODO: configure correct folder here
         return {
@@ -76,7 +93,69 @@ def add_restic_rules(metadata):
 
 
 @metadata_reactor
+def add_acl_config(metadata):
+    possible_acl = [
+        'acl_not_smtp',
+        'acl_not_smtp_mime',
+        'acl_not_smtp_start',
+        'acl_smtp_auth',
+        'acl_smtp_connect',
+        'acl_smtp_data',  # special
+        'acl_smtp_data_prdr',
+        'acl_smtp_dkim',  # special
+        'acl_smtp_etrn',
+        'acl_smtp_expn',
+        'acl_smtp_helo',
+        'acl_smtp_mail',  # special
+        'acl_smtp_mailauth',
+        'acl_smtp_mime',
+        'acl_smtp_notquit',
+        'acl_smtp_predata',
+        'acl_smtp_quit',
+        'acl_smtp_rcpt',  # special
+        'acl_smtp_starttls',
+        'acl_smtp_vrfy',
+    ]
+
+    special_variable_acl = {
+        'acl_smtp_data': 'MAIN_ACL_CHECK_DATA',
+        'acl_smtp_mail': 'MAIN_ACL_CHECK_MAIL',
+        'acl_smtp_rcpt': 'MAIN_ACL_CHECK_RCPT',
+        'acl_smtp_dkim': 'MAIN_ACL_CHECK_DKIM',
+    }
+
+    default_acl = {
+        'acl_smtp_data': 'acl_check_data',
+        'acl_smtp_mail': 'acl_check_mail',
+        'acl_smtp_rcpt': 'acl_check_rcpt',
+        'acl_smtp_dkim': 'acl_check_dkim',
+    }
+
+    config = {
+        'exim': {
+            'main': {
+                'acl': {
+                    'prio': 0,
+                    'content': [],
+                }
+            }
+        }
+    }
+    for acl in possible_acl:
+        if metadata.get(f'exim/acl_config/{acl}', None) is not default_acl.get(acl, None):
+            config['exim']['main']['acl']['content'] += [
+                special_variable_acl.get(acl, acl) + ' = ' + metadata.get(f'exim/acl_config/{acl}'),
+                ]
+
+    if not config['exim']['main']['acl']['content']:
+        return {}
+
+    return config
+
+
+@metadata_reactor
 def add_dkim_config(metadata):
+    # TODO: seperate generation / checking
     if metadata.get('exim/dkim/enabled', False):
         default_config = metadata.get('exim/dkim/defaults', {})
 
@@ -118,7 +197,13 @@ def add_dkim_config(metadata):
                     'enable_dkim': {
                         'prio': 5,
                         'content': [
-                            'acl_smtp_dkim = acl_check_dkim',
+                            '# Defines the access control list that is run when an',
+                            '# SMTP DKIM command is received.',
+                            '#',
+                            '.ifndef MAIN_ACL_CHECK_DKIM',
+                            'MAIN_ACL_CHECK_DKIM = acl_check_dkim',
+                            '.endif',
+                            'acl_smtp_dkim = MAIN_ACL_CHECK_DKIM',
                         ],
                     },
                 },
@@ -127,10 +212,9 @@ def add_dkim_config(metadata):
                         'prio': 10,
                         'content': [
                             'acl_check_dkim:',
-                            '      accept', # TODO: remove this
-                            '',
                             '      # Deny failures',
-                            '      deny',
+                            # '      deny',  # only warn
+                            '      warn',
                             '           dkim_status = fail',
                             '           logwrite = DKIM test failed: $dkim_verify_reason',
                             '           add_header = X-DKIM: DKIM test failed: '
@@ -138,7 +222,8 @@ def add_dkim_config(metadata):
                             '',
                             '',
                             '      # Deny invalid signatures',
-                            '      deny',
+                            # '      deny',  # only warn
+                            '      warn',
                             '           dkim_status = invalid',
                             '           add_header = X-DKIM: $dkim_cur_signer '
                             '($dkim_verify_status); $dkim_verify_reason',
@@ -207,155 +292,229 @@ def add_srs_config(metadata):
 
 
 @metadata_reactor
-def add_greylistd_config(metadata):
-    if metadata.get('exim/greylist/enabled', False):
-        if 'exim4-config_check_rcpt' not in metadata.get('exim/acl', {}) \
-                or 'exim4-config_check_data' not in metadata.get('exim/acl', {}):
-            return {}
-
-        # patch greylist into config
-        check_rcpt = []
-        check_data = []
-
-        for line in metadata.get('exim/acl/exim4-config_check_rcpt/content'):
-            if line == 'acl_check_rcpt:':
-                check_rcpt += [
-                    'acl_check_rcpt:',
-                    '  # greylistd(8) configuration follows.',
-                    '  # This statement has been added by "greylistd-setup-exim4",',
-                    '  # and can be removed by running "greylistd-setup-exim4 remove".',
-                    '  # Any changes you make here will then be lost.',
-                    '  #',
-                    '  # Perform greylisting on incoming messages from remote hosts.',
-                    '  # We do NOT greylist messages with no envelope sender, because that',
-                    '  # would conflict with remote hosts doing callback verifications, and we',
-                    '  # might not be able to send mail to such hosts for a while (until the',
-                    '  # callback attempt is no longer greylisted, and then some).',
-                    '  #',
-                    '  # We also check the local whitelist to avoid greylisting mail from',
-                    '  # hosts that are expected to forward mail here (such as backup MX hosts,',
-                    '  # list servers, etc).',
-                    '  #',
-                    '  # Because the recipient address has not yet been verified, we do so',
-                    '  # now and skip this statement for non-existing recipients.  This is',
-                    '  # in order to allow for a 550 (reject) response below.  If the delivery',
-                    '  # happens over a remote transport (such as "smtp"), recipient callout',
-                    '  # verification is performed, with the original sender intact.',
-                    '  #',
-                    '  defer',
-                    '    message        = $sender_host_address is not yet authorized to deliver \\',
-                    '                     mail from <$sender_address> to <$local_part@$domain>. \\',
-                    '                     Please try later.',
-                    '    log_message    = greylisted.',
-                    '    !senders       = :',
-                    '    !hosts         = : +relay_from_hosts : \\',
-                    '                     ${if exists {/etc/greylistd/whitelist-hosts}\\',
-                    '                                 {/etc/greylistd/whitelist-hosts}{}} : \\',
-                    '                     ${if exists {/var/lib/greylistd/whitelist-hosts}\\',
-                    '                                 {/var/lib/greylistd/whitelist-hosts}{}}',
-                    '    !authenticated = *',
-                    '    !acl           = acl_local_deny_exceptions',
-                    '    !dnslists      = ${if exists {/etc/greylistd/dnswl-known-good-sender}\\',
-                    '                                 {${readfile{/etc/greylistd/dnswl-known-good-sender}}}{}}',
-                    '    domains        = +local_domains : +relay_to_domains',
-                    '    verify         = recipient',
-                    '    condition      = ${readsocket{/var/run/greylistd/socket}\\',
-                    '                                 {--grey \\',
-                    '                                  $sender_host_address \\',
-                    '                                  $sender_address \\',
-                    '                                  $local_part@$domain}\\',
-                    '                                 {5s}{}{false}}',
-                    '',
-                    '  # Deny if blacklisted by greylist',
-                    '  deny',
-                    '    message = $sender_host_address is blacklisted from delivering \\',
-                    '                      mail from <$sender_address> to <$local_part@$domain>.',
-                    '    log_message = blacklisted.',
-                    '    !senders        = :',
-                    '    !authenticated = *',
-                    '    domains        = +local_domains : +relay_to_domains',
-                    '    verify         = recipient',
-                    '    condition      = ${readsocket{/var/run/greylistd/socket}\\',
-                    '                                  {--black \\',
-                    '                                   $sender_host_address \\',
-                    '                                   $sender_address \\',
-                    '                                   $local_part@$domain}\\',
-                    '                                  {5s}{}{false}}',
-                    '',
-                    '',
-                    '',
-                ]
-            else:
-                check_rcpt.append(line)
-
-        for line in metadata.get('exim/acl/exim4-config_check_data/content'):
-            if line == 'acl_check_data:':
-                check_data += [
-                    'acl_check_data:',
-                    '  # greylistd(8) configuration follows.',
-                    '  # This statement has been added by "greylistd-setup-exim4",',
-                    '  # and can be removed by running "greylistd-setup-exim4 remove".',
-                    '  # Any changes you make here will then be lost.',
-                    '  #',
-                    '  # Perform greylisting on incoming messages with no envelope sender here.',
-                    '  # We did not subject these to greylisting after RCPT TO:, because that',
-                    '  # would interfere with remote hosts doing sender callout verifications.',
-                    '  #',
-                    '  # Because there is no sender address, we supply only two data items:',
-                    '  #  - The remote host address',
-                    '  #  - The recipient address (normally, bounces have only one recipient)',
-                    '  #',
-                    '  # We also check the local whitelist to avoid greylisting mail from',
-                    '  # hosts that are expected to forward mail here (such as backup MX hosts,',
-                    '  # list servers, etc).',
-                    '  #',
-                    '  defer',
-                    '    message        = $sender_host_address is not yet authorized to deliver \\',
-                    '                     mail from <$sender_address> to <$recipients>. \\',
-                    '                     Please try later.',
-                    '    log_message    = greylisted.',
-                    '    senders        = :',
-                    '    !hosts         = : +relay_from_hosts : \\',
-                    '                     ${if exists {/etc/greylistd/whitelist-hosts}\\',
-                    '                                 {/etc/greylistd/whitelist-hosts}{}} : \\',
-                    '                     ${if exists {/var/lib/greylistd/whitelist-hosts}\\',
-                    '                                 {/var/lib/greylistd/whitelist-hosts}{}}',
-                    '    !authenticated = *',
-                    '    !acl           = acl_local_deny_exceptions',
-                    '    condition      = ${readsocket{/var/run/greylistd/socket}\\',
-                    '                                 {--grey \\',
-                    '                                  $sender_host_address \\',
-                    '                                  $recipients}\\',
-                    '                                 {5s}{}{false}}',
-                    '',
-                    '  # Deny if blacklisted by greylist',
-                    '  deny',
-                    '    message = $sender_host_address is blacklisted from delivering \\',
-                    '                      mail from <$sender_address> to <$recipients>.',
-                    '    log_message = blacklisted.',
-                    '    !senders        = :',
-                    '    !authenticated = *',
-                    '    condition      = ${readsocket{/var/run/greylistd/socket}\\',
-                    '                                  {--black \\',
-                    '                                   $sender_host_address \\',
-                    '                                   $recipients}\\',
-                    '                                  {5s}{}{false}}',
-                    '',
-                    '',
-                ]
-            else:
-                check_data.append(line)
-
+def add_spamassassin_config(metadata):
+    if metadata.get('exim/spamassassin/enabled', False):
+        spamd_address = metadata.get('exim/spamassassin/address', '127.0.0.1')
+        spamd_user = metadata.get('exim/spamassassin/user', 'debian-spamd')
+        spamd_port = metadata.get('exim/spamassassin/port', 783)
         return {
             'exim': {
-                'acl': {
-                    'exim4-config_check_rcpt': {
-                        'content': atomic(check_rcpt),
-                    },
-                    'exim4-config_check_data': {
-                        'content': atomic(check_data),
+                'main': {
+                    'spamassassin': {
+                        'prio': 4,
+                        'content': [
+                            f'spamd_address = {spamd_address} {spamd_port}'
+                        ],
                     }
+                },
+                'acl_add': {
+                    'acl_smtp_data': {
+                        'spamassassin': {
+                            'prio': 100,
+                            'add_content': [
+                                '  # Reject messages with an "X-Spam-Flag: YES" header.',
+                                '  deny    message   = Sender openly considers message as spam \\',
+                                '                      (X-Spam-Flag header with a positive value was found).',
+                                '          condition = ${if bool{$header_x-spam-flag:}{true}{false}}',
+                                '',
+                                '  # Remove internal headers',
+                                '  warn',
+                                '    remove_header = X-Spam_score: X-Spam_score_int : X-Spam_bar : \\',
+                                '                    X-Spam_report',
+                                '',
+                                '  warn',
+                                '    condition = ${if <{$message_size}{300k}{1}{0}}',
+                                '    # ":true" to add headers/acl variables even if not spam',
+                                f'   spam        = {spamd_user}:true',
+                                '    add_header  = X-Spam_score: $spam_score',
+                                '    add_header  = X-Spam_bar: $spam_bar',
+                                '    # Do not enable this unless you have shorted SpamAssassin\'s report',
+                                '    #add_header = X-Spam_report: $spam_report',
+                                '',
+                                # '  # Reject spam messages (score >15.0).',
+                                # '  # This breaks mailing list and forward messages.',
+                                # '  deny',
+                                # '    condition = ${if <{$message_size}{300k}{1}{0}}',
+                                # '    condition = ${if >{$spam_score_int}{150}{true}{false}}',
+                                # '    message = Classified as spam (score $spam_score)',
+                                '',
 
+                            ],
+                        },
+                    },
+                },
+            },
+        }
+
+    return {}
+
+
+@metadata_reactor
+def add_greylistd_config(metadata):
+    if metadata.get('exim/greylist/enabled', False):
+        return {
+            'exim': {
+                'acl_add': {
+                    'acl_smtp_rcpt': {
+                        'greylist': {
+                            'prio': 0,
+                            'add_content': [
+                                '  # greylistd(8) configuration follows.',
+                                '  # This statement has been added by "greylistd-setup-exim4",',
+                                '  # and can be removed by running "greylistd-setup-exim4 remove".',
+                                '  # Any changes you make here will then be lost.',
+                                '  #',
+                                '  # Perform greylisting on incoming messages from remote hosts.',
+                                '  # We do NOT greylist messages with no envelope sender, because that',
+                                '  # would conflict with remote hosts doing callback verifications, and we',
+                                '  # might not be able to send mail to such hosts for a while (until the',
+                                '  # callback attempt is no longer greylisted, and then some).',
+                                '  #',
+                                '  # We also check the local whitelist to avoid greylisting mail from',
+                                '  # hosts that are expected to forward mail here (such as backup MX hosts,',
+                                '  # list servers, etc).',
+                                '  #',
+                                '  # Because the recipient address has not yet been verified, we do so',
+                                '  # now and skip this statement for non-existing recipients.  This is',
+                                '  # in order to allow for a 550 (reject) response below.  If the delivery',
+                                '  # happens over a remote transport (such as "smtp"), recipient callout',
+                                '  # verification is performed, with the original sender intact.',
+                                '  #',
+                                '  defer',
+                                '    message        = $sender_host_address is not yet authorized to deliver \\',
+                                '                     mail from <$sender_address> to <$local_part@$domain>. \\',
+                                '                     Please try later.',
+                                '    log_message    = greylisted.',
+                                '    !senders       = :',
+                                '    !hosts         = : +relay_from_hosts : \\',
+                                '                     ${if exists {/etc/greylistd/whitelist-hosts}\\',
+                                '                                 {/etc/greylistd/whitelist-hosts}{}} : \\',
+                                '                     ${if exists {/var/lib/greylistd/whitelist-hosts}\\',
+                                '                                 {/var/lib/greylistd/whitelist-hosts}{}}',
+                                '    !authenticated = *',
+                                '    !acl           = acl_local_deny_exceptions',
+                                '    !dnslists      = ${if exists {/etc/greylistd/dnswl-known-good-sender}\\',
+                                '                                 {${readfile{/etc/greylistd/dnswl-known-good-sender}}}{}}',
+                                '    domains        = +local_domains : +relay_to_domains',
+                                '    verify         = recipient',
+                                '    condition      = ${readsocket{/var/run/greylistd/socket}\\',
+                                '                                 {--grey \\',
+                                '                                  $sender_host_address \\',
+                                '                                  $sender_address \\',
+                                '                                  $local_part@$domain}\\',
+                                '                                 {5s}{}{false}}',
+                                '',
+                                '  # Deny if blacklisted by greylist',
+                                '  deny',
+                                '    message = $sender_host_address is blacklisted from delivering \\',
+                                '                      mail from <$sender_address> to <$local_part@$domain>.',
+                                '    log_message = blacklisted.',
+                                '    !senders        = :',
+                                '    !authenticated = *',
+                                '    domains        = +local_domains : +relay_to_domains',
+                                '    verify         = recipient',
+                                '    condition      = ${readsocket{/var/run/greylistd/socket}\\',
+                                '                                  {--black \\',
+                                '                                   $sender_host_address \\',
+                                '                                   $sender_address \\',
+                                '                                   $local_part@$domain}\\',
+                                '                                  {5s}{}{false}}',
+                                '',
+                                '',
+                                '',
+                            ],
+                        },
+                    },
+                    'acl_smtp_data': {
+                        'greylist': {
+                            'prio': 0,
+                            'add_content': [
+                                '  # greylistd(8) configuration follows.',
+                                '  # This statement has been added by "greylistd-setup-exim4",',
+                                '  # and can be removed by running "greylistd-setup-exim4 remove".',
+                                '  # Any changes you make here will then be lost.',
+                                '  #',
+                                '  # Perform greylisting on incoming messages with no envelope sender here.',
+                                '  # We did not subject these to greylisting after RCPT TO:, because that',
+                                '  # would interfere with remote hosts doing sender callout verifications.',
+                                '  #',
+                                '  # Because there is no sender address, we supply only two data items:',
+                                '  #  - The remote host address',
+                                '  #  - The recipient address (normally, bounces have only one recipient)',
+                                '  #',
+                                '  # We also check the local whitelist to avoid greylisting mail from',
+                                '  # hosts that are expected to forward mail here (such as backup MX hosts,',
+                                '  # list servers, etc).',
+                                '  #',
+                                '  defer',
+                                '    message        = $sender_host_address is not yet authorized to deliver \\',
+                                '                     mail from <$sender_address> to <$recipients>. \\',
+                                '                     Please try later.',
+                                '    log_message    = greylisted.',
+                                '    senders        = :',
+                                '    !hosts         = : +relay_from_hosts : \\',
+                                '                     ${if exists {/etc/greylistd/whitelist-hosts}\\',
+                                '                                 {/etc/greylistd/whitelist-hosts}{}} : \\',
+                                '                     ${if exists {/var/lib/greylistd/whitelist-hosts}\\',
+                                '                                 {/var/lib/greylistd/whitelist-hosts}{}}',
+                                '    !authenticated = *',
+                                '    !acl           = acl_local_deny_exceptions',
+                                '    condition      = ${readsocket{/var/run/greylistd/socket}\\',
+                                '                                 {--grey \\',
+                                '                                  $sender_host_address \\',
+                                '                                  $recipients}\\',
+                                '                                 {5s}{}{false}}',
+                                '',
+                                '  # Deny if blacklisted by greylist',
+                                '  deny',
+                                '    message = $sender_host_address is blacklisted from delivering \\',
+                                '                      mail from <$sender_address> to <$recipients>.',
+                                '    log_message = blacklisted.',
+                                '    !senders        = :',
+                                '    !authenticated = *',
+                                '    condition      = ${readsocket{/var/run/greylistd/socket}\\',
+                                '                                  {--black \\',
+                                '                                   $sender_host_address \\',
+                                '                                   $recipients}\\',
+                                '                                  {5s}{}{false}}',
+                                '',
+                                '',
+                            ],
+                        },
+                    },
+                },
+            }
+        }
+
+    return {}
+
+
+@metadata_reactor
+def add_malware_config(metadata):
+    if metadata.get('exim/malware/enabled', False):
+        return {
+            'exim': {
+                'main': {
+                    'malware': {
+                        'prio': 4,
+                        'content': [
+                            'av_scanner = clamd:/run/clamav/clamd.ctl',  # TODO: make configurable
+                        ],
+                    }
+                },
+                'acl_add': {
+                    'acl_smtp_data': {
+                        'malware': {
+                            'prio': 10,
+                            'add_content': [
+                                '  # Reject virus infested messages.',
+                                '  #',
+                                '  warn    message     = This message contains malware ($malware_name)',
+                                '    malware     = *',
+                                '    log_message = This message contains malware ($malware_name)',
+                            ],
+                        },
+                    },
                 },
             }
         }

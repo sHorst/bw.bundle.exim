@@ -1,6 +1,12 @@
 from os.path import join
 from bundlewrap.utils import get_file_contents
 
+global node, repo
+
+
+def sort_by_prio(x):
+    return "{p:50d}_{n}".format(p=int(x[1].get('prio', 10)), n=str(x[0]))
+
 
 pkg_apt = {
     'spf-tools-perl': {
@@ -97,7 +103,8 @@ if exim_config.get('srs', {}).get('enabled', False):
         'needs': needs_exim,
     }
 
-if exim_config.get('clamav', {}).get('enabled', False):
+if exim_config.get('malware', {}).get('enabled', False) and \
+        exim_config.get('malware', {}).get('service', 'clamav') == 'clamav':
     pkg_apt['clamav-daemon'] = {
         "installed": True,
         'needed_by': [
@@ -177,11 +184,12 @@ if exim_config.get('spamassassin', {}).get('enabled', False):
         ],
     }
 
+    # TODO: add spamfilter
+
 if exim_config.get('greylist', {}).get('enabled', False):
     greylist_config = exim_config['greylist']
 
-    svc_systemd['greylistd'] = {
-    }
+    svc_systemd['greylistd'] = {}
     pkg_apt['greylistd'] = {
         "installed": True,
         'needed_by': [
@@ -290,7 +298,7 @@ files['/etc/exim4/update-exim4.conf.conf'] = {
         'dc_other_hostnames': exim_config.get('hostnames', []),
         'dc_local_interfaces': local_interfaces_ips,
         'dc_readhost': exim_config.get('dc_readhost', [node.hostname, ]),
-        'dc_relay_domains': exim_config.get('relay_domains', []),
+        'dc_relay_domains': sorted(exim_config.get('relay_domains', [])),
         'dc_minimaldns': str(exim_config.get('minimaldns', False)).lower(),
         'dc_relay_nets': exim_config.get('relay_nets', []),
         'dc_smarthost': exim_config.get('smarthost', ''),
@@ -302,6 +310,33 @@ files['/etc/exim4/update-exim4.conf.conf'] = {
     'needs': needs_exim,
 }
 
+files['/etc/mailname'] = {
+    'content': exim_config.get('mailname', node.hostname) + "\n",
+    'owner': 'root',
+    'group': 'root',
+    'mode': '0644',
+    'needs': needs_exim,
+}
+
+if exim_config.get('hubbed_hosts', {}):
+    files['/etc/exim4/hubbed_hosts'] = {
+        'content': '\n'.join([f'{h}: ' + ':'.join(i) for h, i in exim_config.get('hubbed_hosts', {}).items()]) + '\n',
+        'owner': 'root',
+        'group': 'root',
+        'mode': '0644',
+        'triggers': [
+            'svc_systemd:exim4:restart',
+        ],
+        'needs': needs_exim,
+    }
+else:
+    files['/etc/exim4/hubbed_hosts'] = {
+        'delete': True,
+        'triggers': [
+            'svc_systemd:exim4:restart',
+        ],
+        'needs': needs_exim,
+    }
 
 files['/etc/aliases'] = {
     'content': "\n".join(aliases_content) + "\n",
@@ -316,12 +351,36 @@ files['/etc/aliases'] = {
 
 generated_config = []
 
+acl_overwrites_high_prio = {}
+acl_overwrites_low_prio = {
+    '  .ifdef LOCAL_DENY_EXCEPTIONS_LOCAL_ACL_FILE': [],  # readd comment, which will get deleted later
+}
+for acl_name, acl_adds in exim_config.get('acl_add', {}).items():
+    content_hp = []
+    content_lp = []
+    for acl_sub_name, acl_add_content in sorted(acl_adds.items(), key=sort_by_prio):
+        if acl_name not in ('acl_smtp_rcpt', 'acl_smtp_data') or acl_add_content.get('prio', 0) < 100:
+            content_hp += acl_add_content.get('add_content', [])
+        else:
+            content_lp += acl_add_content.get('add_content', [])
+    acl_overwrites_high_prio[exim_config.get('acl_config', {}).get(acl_name, acl_name) + ':'] = content_hp
+
+    if acl_name == 'acl_smtp_rcpt':
+        acl_overwrites_low_prio['  .ifdef CHECK_RCPT_LOCAL_ACL_FILE'] = content_lp
+    elif acl_name == 'acl_smtp_data':
+        acl_overwrites_low_prio['  .ifdef CHECK_DATA_LOCAL_ACL_FILE'] = content_lp
+
+remove_lines = [
+    '  # This hook allows you to hook in your own ACLs without having to',
+    '  # modify this file. If you do it like we suggest, you\'ll end up with',
+    '  # a small performance penalty since there is an additional file being',
+    '  # accessed. This doesn\'t happen if you leave the macro unset.',
+]
+
 # load in correct order
 for config_group in ['main', 'acl', 'router', 'transport', 'retry', 'rewrite', 'auth']:
     # order by prio
-    for config_name, config in sorted(exim_config.get(config_group, {}).items(),
-                                      key=lambda x: "{p:50d}_{n}".format(p=int(x[1].get('prio', 10)), n=str(x[0]))
-                                      ):
+    for config_name, config in sorted(exim_config.get(config_group, {}).items(), key=sort_by_prio):
         if config.get('disabled', False):
             continue
         generated_config += [
@@ -333,8 +392,32 @@ for config_group in ['main', 'acl', 'router', 'transport', 'retry', 'rewrite', '
             ),
             '#####################################################'
         ]
-        generated_config += config.get('content', [])
-        generated_config += config.get('additional_content', [])
+
+        if config_group == 'acl':
+            for line in config.get('content', []):
+                if line in acl_overwrites_high_prio.keys():
+                    generated_config += [line, ]
+                    generated_config += acl_overwrites_high_prio[line]
+                elif line in acl_overwrites_low_prio.keys():
+                    # add before the ifdef line
+                    generated_config += acl_overwrites_low_prio[line]
+                    generated_config += [
+                        '  # This hook allows you to hook in your own ACLs without having to',
+                        '  # modify this file. If you do it like we suggest, you\'ll end up with',
+                        '  # a small performance penalty since there is an additional file being',
+                        '  # accessed. This doesn\'t happen if you leave the macro unset.',
+                        line,
+                    ]
+                elif line in remove_lines:
+                    pass
+                else:
+                    generated_config.append(line)
+
+            generated_config += config.get('additional_content', [])
+        else:
+            generated_config += config.get('content', [])
+            generated_config += config.get('additional_content', [])
+
         generated_config += [
             '#####################################################',
             '### end {group}/{prio:02d}_{name}'.format(
@@ -367,6 +450,7 @@ files['/etc/default/exim4'] = {
     'needs': needs_exim,
 }
 
+# TODO: seperate generation / checking
 if exim_config.get('dkim', {}).get('enabled', False):
     directories['/etc/exim4/dkim'] = {
         'mode': '755',
