@@ -27,7 +27,8 @@ defaults['exim']['acl_add'] = {
     'acl_smtp_rcpt': {},
     'acl_smtp_data': {},
     'acl_smtp_dkim': {},
-},
+}
+
 defaults['exim']['dkim'] = {
     'defaults': {
         'canon': 'relaxed',
