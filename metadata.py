@@ -155,6 +155,15 @@ def add_acl_config(metadata):
 
 
 @metadata_reactor
+def convert_relay_domains(metadata):
+    return {
+        'exim': {
+            'relay_domains': list(metadata.get('exim/hubbed_hosts', {}).keys()),
+        }
+    }
+
+
+@metadata_reactor
 def add_dkim_config(metadata):
     # TODO: seperate generation / checking
     if metadata.get('exim/dkim/enabled', False):
@@ -316,6 +325,7 @@ def add_spamassassin_config(metadata):
                                 '  # Reject messages with an "X-Spam-Flag: YES" header.',
                                 '  deny    message   = Sender openly considers message as spam \\',
                                 '                      (X-Spam-Flag header with a positive value was found).',
+                                '          !hosts    = : +relay_from_hosts',
                                 '          condition = ${if bool{$header_x-spam-flag:}{true}{false}}',
                                 '',
                                 '  # Remove internal headers',

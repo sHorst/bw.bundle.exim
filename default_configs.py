@@ -469,7 +469,7 @@ default_configs = {
                 '  accept',
                 '    domains = +relay_to_domains',
                 '    endpass',
-                '    verify = recipient',
+                '    verify = recipient/callout',
                 '',
                 '',
                 '  # At this point, the address has passed all the checks that have been',

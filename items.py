@@ -299,7 +299,7 @@ files['/etc/exim4/update-exim4.conf.conf'] = {
         'dc_other_hostnames': exim_config.get('hostnames', []),
         'dc_local_interfaces': local_interfaces_ips,
         'dc_readhost': exim_config.get('dc_readhost', [node.hostname, ]),
-        'dc_relay_domains': sorted(exim_config.get('relay_domains', [])),
+        'dc_relay_domains': sorted(list(set(exim_config.get('relay_domains', [])))),
         'dc_minimaldns': str(exim_config.get('minimaldns', False)).lower(),
         'dc_relay_nets': exim_config.get('relay_nets', []),
         'dc_smarthost': exim_config.get('smarthost', ''),
@@ -394,7 +394,17 @@ for config_group in ['main', 'acl', 'router', 'transport', 'retry', 'rewrite', '
             '#####################################################'
         ]
 
-        if config_group == 'acl':
+        if config_group == 'main':
+            for line in config.get('content', []):
+                if line == 'UPEX4CmacrosUPEX4C = 1':
+                    # add macros right after debian macros
+                    generated_config += [line, '', ]
+                    generated_config += exim_config.get('after_UPEX4CmacrosUPEX4C', [])
+                else:
+                    generated_config.append(line)
+
+            generated_config += config.get('additional_content', [])
+        elif config_group == 'acl':
             for line in config.get('content', []):
                 if line in acl_overwrites_high_prio.keys():
                     generated_config += [line, ]
