@@ -94,6 +94,39 @@ def add_restic_rules(metadata):
 
 
 @metadata_reactor
+def add_dehydrated_hook(metadata):
+    if not node.has_bundle('dehydrated'):
+        raise DoNotRunAgain
+
+    # is enabled by default
+    if metadata.get('exim/tls/enabled', True):
+        mail_hostnames = metadata.get('exim/hostnames', [node.hostname, ])
+
+        return {
+            'dehydrated': {
+                'domains': [' '.join(mail_hostnames), ],
+                'hooks': {
+                    'deploy_cert': {
+                        'exim': [
+                            f'if [ "$DOMAIN" = "{mail_hostnames[0]}" ]; then',
+                            '  cp "$FULLCHAINFILE" /etc/exim4/exim.crt',
+                            '  cp "$KEYFILE" /etc/exim4/exim.key',
+                            '',
+                            '  chown Debian-exim /etc/exim4/exim.crt',
+                            '  chown Debian-exim /etc/exim4/exim.key',
+                            '',
+                            '  service exim4 restart',
+                            'fi',
+                        ]
+                    }
+                }
+            }
+        }
+    else:
+        return {}
+
+
+@metadata_reactor
 def add_acl_config(metadata):
     possible_acl = [
         'acl_not_smtp',
@@ -158,7 +191,8 @@ def add_acl_config(metadata):
 def convert_relay_domains(metadata):
     return {
         'exim': {
-            'relay_domains': list(metadata.get('exim/hubbed_hosts', {}).keys()),
+            'relay_domains': [x for x in metadata.get('exim/hubbed_hosts', {}).keys() if x not in
+                              metadata.get('exim/blacklist_relay_domains', [])]
         }
     }
 
