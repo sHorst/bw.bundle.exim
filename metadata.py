@@ -80,7 +80,7 @@ def add_restic_rules(metadata):
     if not node.has_bundle('restic'):
         raise DoNotRunAgain
 
-    if metadata.get('exim/configtype', '') in ('internet', 'smarthost'):
+    if metadata.get('exim/configtype', '') in ('internet', 'smarthost') and metadata.get('exim/vexim/enabled', False):
         # TODO: add spool and other directoryies
         # TODO: configure correct folder here
         return {
@@ -441,6 +441,8 @@ def add_greylistd_config(metadata):
                                 '    !dnslists      = ${if exists {/etc/greylistd/dnswl-known-good-sender}\\',
                                 '                                 {${readfile{/etc/greylistd/dnswl-known-good-sender}}}{}}',
                                 '    domains        = +local_domains : +relay_to_domains',
+                                '    local_parts    = ${if exists {/etc/greylistd/whitelist-local-$domain}\\',
+                                '                                 {!/etc/greylistd/whitelist-local-$domain_data}{*}}',
                                 '    verify         = recipient',
                                 '    condition      = ${readsocket{/var/run/greylistd/socket}\\',
                                 '                                 {--grey \\',

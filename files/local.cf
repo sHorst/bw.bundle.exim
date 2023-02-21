@@ -117,8 +117,9 @@ endif # Mail::SpamAssassin::Plugin::Shortcircuit
 
 use_pyzor 1
 pyzor_options --homedir /etc/mail/spamassassin
-use_razor 1
-razor_config /etc/razor/razor-agent.conf
+# razor not available
+# use_razor 1
+# razor_config /etc/razor/razor-agent.conf
 
 # Charset
 report_charset		UTF-8
@@ -128,7 +129,7 @@ report_contact		postmaster@ultrachaos.de
 report_hostname		ultrachaos.de
 
 # I Don't understand other languages
-ok_languages		en nl de fr
+# ok_languages		en nl de fr
 ok_locales		en nl de fr
 
 # HTML with image and 0 - 400 bytes text
