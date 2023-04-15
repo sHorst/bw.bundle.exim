@@ -85,7 +85,7 @@ def add_restic_rules(metadata):
         # TODO: configure correct folder here
         return {
             'restic': {
-                'backup_folders': ['/var/opt/vmail', ]
+                'backup_folders': set('/var/opt/vmail')
             }
 
         }
