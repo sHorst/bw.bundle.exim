@@ -85,7 +85,9 @@ def add_restic_rules(metadata):
         # TODO: configure correct folder here
         return {
             'restic': {
-                'backup_folders': ['/var/opt/vmail', ]
+                'backup_folders': {
+                    '/avar/opt/vmail',
+                }
             }
 
         }
@@ -104,7 +106,7 @@ def add_dehydrated_hook(metadata):
 
         return {
             'dehydrated': {
-                'domains': set(' '.join(mail_hostnames), ),
+                'domains': {' '.join(mail_hostnames), },
                 'hooks': {
                     'deploy_cert': {
                         'exim': [
