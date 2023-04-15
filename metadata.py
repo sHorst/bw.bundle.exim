@@ -104,7 +104,7 @@ def add_dehydrated_hook(metadata):
 
         return {
             'dehydrated': {
-                'domains': [' '.join(mail_hostnames), ],
+                'domains': set(' '.join(mail_hostnames), ),
                 'hooks': {
                     'deploy_cert': {
                         'exim': [
