@@ -86,7 +86,7 @@ def add_restic_rules(metadata):
         return {
             'restic': {
                 'backup_folders': {
-                    '/avar/opt/vmail',
+                    '/var/opt/vmail',
                 }
             }
 
