@@ -397,6 +397,79 @@ def add_spamassassin_config(metadata):
 
 
 @metadata_reactor
+def add_rspamd_config(metadata):
+    if metadata.get('exim/rspamd/enabled', False):
+        spamd_address = metadata.get('exim/rspamd/address', '127.0.0.1')
+        spamd_user = metadata.get('exim/rspamd/user', 'nobody')
+        spamd_port = metadata.get('exim/rspamd/port', 11333)
+        return {
+            'exim': {
+                'main': {
+                    'rspamd': {
+                        'prio': 4,
+                        'content': [
+                            f'spamd_address = {spamd_address} {spamd_port} variant=rspamd'
+                        ],
+                    }
+                },
+                'acl_add': {
+                    'acl_smtp_data': {
+                        'rspamd': {
+                            'prio': 100,
+                            'add_content': [
+                                '  # Reject messages with an "X-Spam-Flag: YES" header.',
+                                '  deny    message   = Sender openly considers message as spam \\',
+                                '                      (X-Spam-Flag header with a positive value was found).',
+                                '          !hosts    = : +relay_from_hosts',
+                                '          condition = ${if bool{$header_x-spam-flag:}{true}{false}}',
+                                '',
+                                '  # scan the message with rspamd',
+                                f'  warn spam = {spamd_user}:true',
+                                '  # This will set variables as follows:',
+                                '  # $spam_action is the action recommended by rspamd',
+                                '  # $spam_score is the message score (we unlikely need it)',
+                                '  # $spam_score_int is spam score multiplied by 10',
+                                '  # $spam_report lists symbols matched & protocol messages',
+                                '  # $spam_bar is a visual indicator of spam/ham level',
+                                '',
+                                '  # use greylisting available in rspamd v1.3+',
+                                '  # defer message    = Please try again later',
+                                '  #   condition  = ${if eq{$spam_action}{soft reject}}',
+                                '',
+                                '  deny  message    = Message discarded as high-probability spam',
+                                '        condition  = ${if eq{$spam_action}{reject}}',
+                                '',
+                                '  # Remove foreign headers',
+                                '  warn remove_header = x-spam-bar : x-spam-score : x-spam-report : x-spam-status',
+                                '',
+                                '  # add spam-score and spam-report header when "add header" action is recommended by rspamd',
+                                '  warn',
+                                '    condition  = ${if eq{$spam_action}{add header}}',
+                                '    add_header = X-Spam-Score: $spam_score ($spam_bar)',
+                                '    add_header = X-Spam-Report: $spam_report',
+                                '',
+                                '  # add x-spam-status header if message is not ham',
+                                '  # do not match when $spam_action is empty (e.g. when rspamd is not running)',
+                                '  warn',
+                                '    ! condition  = ${if match{$spam_action}{^no action\$|^greylist\$|^\$}}',
+                                '    add_header = X-Spam-Status: Yes',
+                                '',
+                                '  # add x-spam-bar header if score is positive',
+                                '  warn',
+                                '    condition = ${if >{$spam_score_int}{0}}',
+                                '    add_header = X-Spam-Bar: $spam_bar',
+                                '',
+                            ],
+                        },
+                    },
+                },
+            },
+        }
+
+    return {}
+
+
+@metadata_reactor
 def add_greylistd_config(metadata):
     if metadata.get('exim/greylist/enabled', False):
         return {

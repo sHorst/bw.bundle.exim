@@ -187,6 +187,20 @@ if exim_config.get('spamassassin', {}).get('enabled', False):
 
     # TODO: add spamfilter
 
+if exim_config.get('rspamd', {}).get('enabled', False):
+    svc_systemd['rspamd'] = {
+        'needed_by': [
+            'svc_systemd:exim4'
+        ],
+    }
+    pkg_apt['rspamd'] = {
+        "installed": True,
+        'needed_by': [
+            'svc_systemd:rspamd',
+        ],
+        'needs': needs_exim,
+    }
+
 if exim_config.get('greylist', {}).get('enabled', False):
     greylist_config = exim_config['greylist']
 
