@@ -425,9 +425,11 @@ def add_rspamd_config(metadata):
                             '          !hosts    = : +relay_from_hosts',
                             '          condition = ${if bool{$header_x-spam-flag:}{true}{false}}',
                             '',
+                            '  # do not check relayed messages for spam',
+                            '  accept  hosts = : +relay_from_hosts',
+                            '',
                             '  # scan the message with rspamd',
                             f'  warn   spam   = {spamd_user}:true',
-                            '         !hosts = : +relay_from_hosts',
                             '',
 
                             '  # This will set variables as follows:',
