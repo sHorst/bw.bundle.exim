@@ -405,7 +405,7 @@ def add_rspamd_config(metadata):
         spamd_user = metadata.get('exim/rspamd/user', 'nobody')
         spamd_port = metadata.get('exim/rspamd/port', 11333)
 
-        config['exim'] =  {
+        config['exim'] = {
             'main': {
                 'rspamd': {
                     'prio': 4,
@@ -426,7 +426,10 @@ def add_rspamd_config(metadata):
                             '          condition = ${if bool{$header_x-spam-flag:}{true}{false}}',
                             '',
                             '  # scan the message with rspamd',
-                            f'  warn spam = {spamd_user}:true',
+                            f'  warn   spam   = {spamd_user}:true',
+                            '         !hosts = : +relay_from_hosts',
+                            '',
+
                             '  # This will set variables as follows:',
                             '  # $spam_action is the action recommended by rspamd',
                             '  # $spam_score is the message score (we unlikely need it)',
