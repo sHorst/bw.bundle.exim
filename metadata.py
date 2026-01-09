@@ -8,7 +8,13 @@ defaults = {}
 
 # load default_configs, which is located next to us, but we have to do this limbo to import it
 input_variables = {}
-exec(get_file_contents(join(repo.path, 'bundles', 'exim', 'default_configs.py')), input_variables)
+
+if node.os == 'debian' and node.os_version[0] >= 13:
+    default_configs_filename = 'default_configs_4_98.py'
+else:
+    default_configs_filename = 'default_configs_4_94.py'
+
+exec(get_file_contents(join(repo.path, 'bundles', 'exim', default_configs_filename)), input_variables)
 default_configs = input_variables.get('default_configs', {})
 
 # load default_config into exim_config
